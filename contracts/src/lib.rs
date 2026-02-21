@@ -288,4 +288,3 @@ impl StellarStream {
             .extend_ttl(&stream_key, THRESHOLD, LIMIT);
     }
 }
-
