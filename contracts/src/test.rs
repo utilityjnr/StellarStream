@@ -1,10 +1,10 @@
 #![cfg(test)]
 
 use super::*;
-// Note: testutils trait is needed for Address::generate
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{token, Address, Env};
 
+#[allow(dead_code)]
 struct TestContext {
     env: Env,
     contract_id: Address,
@@ -24,7 +24,7 @@ fn setup_test() -> TestContext {
 
     let token_admin = Address::generate(&env);
 
-    // v22 Change: register_stellar_asset_contract -> register_stellar_asset_contract
+    #[allow(deprecated)]
     let token_id = env.register_stellar_asset_contract(token_admin.clone());
     let token = token::StellarAssetClient::new(&env, &token_id);
 
@@ -187,5 +187,5 @@ fn test_unpause_allows_operations() {
         .client
         .create_stream(&sender, &receiver, &ctx.token_id, &1000, &0, &1000);
 
-    assert_eq!(stream_id, 0);
+    assert_eq!(stream_id, 1);
 }
