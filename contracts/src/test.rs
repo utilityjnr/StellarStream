@@ -1,311 +1,431 @@
 #![cfg(test)]
 
-use crate::{math, StreamingContract, StreamingContractClient};
-use soroban_sdk::{
-    contract, contractimpl, testutils::{Address as _, Ledger}, token, Address, Env,
-};
+use super::*;
+use soroban_sdk::testutils::{Address as _, Ledger as _};
+use soroban_sdk::{token, Address, Env};
 
-// Mock attacker contract that attempts re-entrancy
-#[contract]
-pub struct AttackerContract;
-
-#[contractimpl]
-impl AttackerContract {
-    /// This function will be called when tokens are received
-    /// It attempts to call withdraw again (re-entrancy attack)
-    pub fn attack(env: Env, target_contract: Address, stream_id: u64, receiver: Address) {
-        // Try to call withdraw on the target contract again
-        let client = StreamingContractClient::new(&env, &target_contract);
-        
-        // This should fail due to re-entrancy guard
-        client.withdraw(&stream_id, &receiver);
-    }
+#[allow(dead_code)]
+struct TestContext {
+    env: Env,
+    contract_id: Address,
+    client: StellarStreamClient<'static>,
+    token_admin: Address,
+    token: token::StellarAssetClient<'static>,
+    token_id: Address,
 }
 
-fn setup_test_env() -> (Env, Address, Address, Address, Address, Address, StreamingContractClient<'static>) {
+fn setup_test() -> TestContext {
     let env = Env::default();
     env.mock_all_auths();
 
-    let admin = Address::generate(&env);
-    let sender = Address::generate(&env);
-    let receiver = Address::generate(&env);
+    // v22 Change: register_contract -> register
+    let contract_id = env.register(StellarStream, ());
+    let client = StellarStreamClient::new(&env, &contract_id);
+
     let token_admin = Address::generate(&env);
 
-    // Deploy token contract
-    let token_address = env.register_stellar_asset_contract_v2(token_admin.clone()).address();
-    let token_admin_client = token::StellarAssetClient::new(&env, &token_address);
+    #[allow(deprecated)]
+    let token_id = env.register_stellar_asset_contract(token_admin.clone());
+    let token = token::StellarAssetClient::new(&env, &token_id);
 
-    // Mint tokens to sender
-    token_admin_client.mint(&sender, &1000);
-
-    // Deploy streaming contract
-    let contract_id = env.register(StreamingContract, ());
-    let client = StreamingContractClient::new(&env, &contract_id);
-
-    // Initialize contract
-    client.initialize(&admin);
-
-    (env, admin, sender, receiver, token_address, token_admin, client)
+    TestContext {
+        env,
+        contract_id,
+        client,
+        token_admin,
+        token,
+        token_id,
+    }
 }
 
 #[test]
-fn test_create_and_withdraw_stream() {
-    let (env, _admin, sender, receiver, token_address, _token_admin, client) = setup_test_env();
-    let token = token::Client::new(&env, &token_address);
+fn test_full_stream_cycle() {
+    let ctx = setup_test();
+    let sender = Address::generate(&ctx.env);
+    let receiver = Address::generate(&ctx.env);
 
-    // Create stream
-    let amount = 1000i128;
-    let start_time = 100u64;
-    let end_time = 200u64;
+    let amount = 100_i128;
+    let start_time = 1000;
+    let cliff_time = 1025;
+    let end_time = 1100;
 
-    let stream_id = client.create_stream(
+    ctx.token.mint(&sender, &amount);
+
+    let stream_id = ctx.client.create_stream(
         &sender,
         &receiver,
-        &token_address,
+        &ctx.token_id,
         &amount,
         &start_time,
+        &cliff_time,
         &end_time,
     );
 
-    // Verify stream created
-    let stream = client.get_stream(&stream_id);
-    assert_eq!(stream.sender, sender);
-    assert_eq!(stream.receiver, receiver);
-    assert_eq!(stream.amount, amount);
-
-    // Set time to midpoint
-    env.ledger().with_mut(|li| li.timestamp = 150);
-
-    // Calculate expected withdrawable
-    let unlocked = math::calculate_unlocked_amount(amount, start_time, end_time, 150);
-    let expected_withdrawable = math::calculate_withdrawable_amount(unlocked, 0);
-
-    // Withdraw
-    let withdrawn = client.withdraw(&stream_id, &receiver);
-    assert_eq!(withdrawn, expected_withdrawable);
-
-    // Verify receiver balance
-    assert_eq!(token.balance(&receiver), expected_withdrawable);
-
-    // Verify stream updated
-    let stream = client.get_stream(&stream_id);
-    assert_eq!(stream.withdrawn_amount, expected_withdrawable);
-}
-
-#[test]
-fn test_cancel_stream() {
-    let (env, _admin, sender, receiver, token_address, _token_admin, client) = setup_test_env();
-    let token = token::Client::new(&env, &token_address);
-
-    // Create stream
-    let amount = 1000i128;
-    let start_time = 100u64;
-    let end_time = 200u64;
-
-    let stream_id = client.create_stream(
-        &sender,
-        &receiver,
-        &token_address,
-        &amount,
-        &start_time,
-        &end_time,
-    );
-
-    // Set time to midpoint
-    env.ledger().with_mut(|li| li.timestamp = 150);
-
-    // Cancel stream
-    let returned = client.cancel_stream(&stream_id, &sender);
-
-    // Calculate expected amounts
-    let unlocked = math::calculate_unlocked_amount(amount, start_time, end_time, 150);
-    let expected_returned = amount - unlocked;
-
-    assert_eq!(returned, expected_returned);
-
-    // Verify receiver got unlocked amount
-    assert_eq!(token.balance(&receiver), unlocked);
-
-    // Verify sender got remaining amount
-    assert_eq!(token.balance(&sender), expected_returned);
-}
-
-#[test]
-fn test_sequential_withdrawals_work() {
-    let (env, _admin, sender, receiver, token_address, _token_admin, client) = setup_test_env();
-    let token = token::Client::new(&env, &token_address);
-
-    // Create stream
-    let amount = 1000i128;
-    let start_time = 100u64;
-    let end_time = 200u64;
-
-    let stream_id = client.create_stream(
-        &sender,
-        &receiver,
-        &token_address,
-        &amount,
-        &start_time,
-        &end_time,
-    );
-
-    // First withdrawal at 25% progress
-    env.ledger().with_mut(|li| li.timestamp = 125);
-    let withdrawn1 = client.withdraw(&stream_id, &receiver);
-    assert_eq!(withdrawn1, 250);
-
-    // Second withdrawal at 50% progress
-    env.ledger().with_mut(|li| li.timestamp = 150);
-    let withdrawn2 = client.withdraw(&stream_id, &receiver);
-    assert_eq!(withdrawn2, 250);
-
-    // Third withdrawal at 75% progress
-    env.ledger().with_mut(|li| li.timestamp = 175);
-    let withdrawn3 = client.withdraw(&stream_id, &receiver);
-    assert_eq!(withdrawn3, 250);
-
-    // Verify total balance
-    assert_eq!(token.balance(&receiver), 750);
-}
-
-#[test]
-#[should_panic(expected = "Re-entrancy detected")]
-fn test_reentrancy_guard_prevents_nested_calls() {
-    let (env, _admin, sender, receiver, token_address, _token_admin, client) = setup_test_env();
-
-    // Create stream
-    let amount = 1000i128;
-    let start_time = 100u64;
-    let end_time = 200u64;
-
-    let stream_id = client.create_stream(
-        &sender,
-        &receiver,
-        &token_address,
-        &amount,
-        &start_time,
-        &end_time,
-    );
-
-    // Set time to midpoint
-    env.ledger().with_mut(|li| li.timestamp = 150);
-
-    // Manually set the lock to simulate being inside a withdraw call
-    // This demonstrates that our mutex prevents nested calls
-    use crate::DataKey;
-    env.as_contract(&client.address, || {
-        env.storage().temporary().set(&DataKey::ReentrancyLock, &true);
+    // v22 Change: ledger().with_mut() -> ledger().set()
+    ctx.env.ledger().set(soroban_sdk::testutils::LedgerInfo {
+        timestamp: 1050,
+        protocol_version: 22,
+        sequence_number: 1,
+        network_id: [0u8; 32],
+        base_reserve: 0,
+        min_temp_entry_ttl: 0,
+        min_persistent_entry_ttl: 0,
+        max_entry_ttl: 1000000,
     });
-    
-    // Now try to call withdraw - this should panic with "Re-entrancy detected"
-    client.withdraw(&stream_id, &receiver);
+
+    let withdrawn = ctx.client.withdraw(&stream_id, &receiver);
+    assert_eq!(withdrawn, 50);
+
+    let token_client = token::Client::new(&ctx.env, &ctx.token_id);
+    assert_eq!(token_client.balance(&receiver), 50);
 }
 
 #[test]
-fn test_lock_is_released_after_successful_withdrawal() {
-    let (env, _admin, sender, receiver, token_address, _token_admin, client) = setup_test_env();
-
-    // Create stream
-    let stream_id = client.create_stream(
-        &sender,
-        &receiver,
-        &token_address,
-        &1000,
-        &100,
-        &200,
-    );
-
-    env.ledger().with_mut(|li| li.timestamp = 150);
-
-    // Verify lock is not set initially
-    use crate::DataKey;
-    let locked_before = env.as_contract(&client.address, || {
-        env.storage().temporary().get::<DataKey, bool>(&DataKey::ReentrancyLock).unwrap_or(false)
-    });
-    assert!(!locked_before, "Lock should not be set before withdrawal");
-
-    // Perform withdrawal
-    let withdrawn = client.withdraw(&stream_id, &receiver);
-    assert!(withdrawn > 0);
-    
-    // Verify lock is released after withdrawal
-    let locked_after = env.as_contract(&client.address, || {
-        env.storage().temporary().get::<DataKey, bool>(&DataKey::ReentrancyLock).unwrap_or(false)
-    });
-    assert!(!locked_after, "Lock should be released after withdrawal");
-}
-
-#[test]
-fn test_soroban_defense_in_depth() {
-    // This test documents that Soroban provides defense-in-depth:
-    // 1. Host-level prevention of contract re-entry
-    // 2. Application-level mutex (our implementation)
-    let (env, _admin, sender, receiver, token_address, _token_admin, client) = setup_test_env();
-
-    // Create stream
-    let stream_id = client.create_stream(
-        &sender,
-        &receiver,
-        &token_address,
-        &1000,
-        &100,
-        &200,
-    );
-
-    env.ledger().with_mut(|li| li.timestamp = 150);
-
-    // Normal withdrawal works fine
-    let withdrawn = client.withdraw(&stream_id, &receiver);
-    assert!(withdrawn > 0);
-    
-    // Sequential calls work fine (lock is released between calls)
-    env.ledger().with_mut(|li| li.timestamp = 175);
-    let withdrawn2 = client.withdraw(&stream_id, &receiver);
-    assert!(withdrawn2 > 0);
-}
-
-#[test]
-#[should_panic(expected = "Unauthorized: not the receiver")]
+#[should_panic(expected = "Unauthorized: You are not the receiver of this stream")]
 fn test_unauthorized_withdrawal() {
-    let (env, _admin, sender, receiver, token_address, _token_admin, client) = setup_test_env();
+    let ctx = setup_test();
+    let sender = Address::generate(&ctx.env);
+    let receiver = Address::generate(&ctx.env);
+    let thief = Address::generate(&ctx.env);
 
-    let unauthorized = Address::generate(&env);
+    ctx.token.mint(&sender, &100);
+    let stream_id =
+        ctx.client
+            .create_stream(&sender, &receiver, &ctx.token_id, &100, &0, &50, &100);
 
-    // Create stream
-    let stream_id = client.create_stream(
-        &sender,
-        &receiver,
-        &token_address,
-        &1000,
-        &100,
-        &200,
-    );
-
-    // Set time to midpoint
-    env.ledger().with_mut(|li| li.timestamp = 150);
-
-    // Try to withdraw as unauthorized user - should panic
-    client.withdraw(&stream_id, &unauthorized);
+    ctx.client.withdraw(&stream_id, &thief);
 }
 
 #[test]
-#[should_panic(expected = "No tokens available to withdraw")]
-fn test_withdraw_before_start() {
-    let (env, _admin, sender, receiver, token_address, _token_admin, client) = setup_test_env();
+fn test_cancellation_split() {
+    let ctx = setup_test();
+    let sender = Address::generate(&ctx.env);
+    let receiver = Address::generate(&ctx.env);
+    let amount = 1000_i128;
 
-    // Create stream
-    let stream_id = client.create_stream(
+    ctx.token.mint(&sender, &amount);
+    let stream_id =
+        ctx.client
+            .create_stream(&sender, &receiver, &ctx.token_id, &amount, &0, &100, &1000);
+
+    // Jump to 25% (250 seconds in)
+    ctx.env.ledger().set(soroban_sdk::testutils::LedgerInfo {
+        timestamp: 250,
+        protocol_version: 22,
+        sequence_number: 1,
+        network_id: [0u8; 32],
+        base_reserve: 0,
+        min_temp_entry_ttl: 0,
+        min_persistent_entry_ttl: 0,
+        max_entry_ttl: 1000000,
+    });
+
+    ctx.client.cancel_stream(&stream_id);
+
+    let token_client = token::Client::new(&ctx.env, &ctx.token_id);
+    assert_eq!(token_client.balance(&receiver), 250);
+    assert_eq!(token_client.balance(&sender), 750);
+}
+
+#[test]
+fn test_protocol_fee() {
+    let ctx = setup_test();
+    let admin = Address::generate(&ctx.env);
+    let treasury = Address::generate(&ctx.env);
+    let sender = Address::generate(&ctx.env);
+    let receiver = Address::generate(&ctx.env);
+
+    ctx.client.initialize_fee(&admin, &100, &treasury);
+
+    ctx.token.mint(&sender, &1000);
+    let stream_id =
+        ctx.client
+            .create_stream(&sender, &receiver, &ctx.token_id, &1000, &0, &100, &1000);
+
+    assert_eq!(stream_id, 1);
+
+    let token_client = token::Client::new(&ctx.env, &ctx.token_id);
+    assert_eq!(token_client.balance(&treasury), 10);
+    assert_eq!(token_client.balance(&ctx.contract_id), 990);
+}
+
+#[test]
+fn test_transfer_receiver() {
+    let ctx = setup_test();
+    let sender = Address::generate(&ctx.env);
+    let old_receiver = Address::generate(&ctx.env);
+    let new_receiver = Address::generate(&ctx.env);
+
+    ctx.token.mint(&sender, &1000);
+    let stream_id = ctx.client.create_stream(
         &sender,
-        &receiver,
-        &token_address,
+        &old_receiver,
+        &ctx.token_id,
         &1000,
+        &0,
         &100,
-        &200,
+        &1000,
     );
 
-    // Set time before start
-    env.ledger().with_mut(|li| li.timestamp = 50);
+    ctx.client.transfer_receiver(&stream_id, &new_receiver);
 
-    // Try to withdraw - should panic
-    client.withdraw(&stream_id, &receiver);
+    ctx.env.ledger().set(soroban_sdk::testutils::LedgerInfo {
+        timestamp: 500,
+        protocol_version: 22,
+        sequence_number: 1,
+        network_id: [0u8; 32],
+        base_reserve: 0,
+        min_temp_entry_ttl: 0,
+        min_persistent_entry_ttl: 0,
+        max_entry_ttl: 1000000,
+    });
+
+    let withdrawn = ctx.client.withdraw(&stream_id, &new_receiver);
+    assert_eq!(withdrawn, 500);
+
+    let token_client = token::Client::new(&ctx.env, &ctx.token_id);
+    assert_eq!(token_client.balance(&new_receiver), 500);
+}
+
+#[test]
+#[should_panic(expected = "Unauthorized: You are not the receiver of this stream")]
+fn test_old_receiver_cannot_withdraw_after_transfer() {
+    let ctx = setup_test();
+    let sender = Address::generate(&ctx.env);
+    let old_receiver = Address::generate(&ctx.env);
+    let new_receiver = Address::generate(&ctx.env);
+
+    ctx.token.mint(&sender, &1000);
+    let stream_id = ctx.client.create_stream(
+        &sender,
+        &old_receiver,
+        &ctx.token_id,
+        &1000,
+        &0,
+        &100,
+        &1000,
+    );
+
+    ctx.client.transfer_receiver(&stream_id, &new_receiver);
+
+    ctx.env.ledger().set(soroban_sdk::testutils::LedgerInfo {
+        timestamp: 500,
+        protocol_version: 22,
+        sequence_number: 1,
+        network_id: [0u8; 32],
+        base_reserve: 0,
+        min_temp_entry_ttl: 0,
+        min_persistent_entry_ttl: 0,
+        max_entry_ttl: 1000000,
+    });
+
+    ctx.client.withdraw(&stream_id, &old_receiver);
+}
+
+#[test]
+fn test_batch_stream_creation() {
+    let ctx = setup_test();
+    let sender = Address::generate(&ctx.env);
+    let receiver1 = Address::generate(&ctx.env);
+    let receiver2 = Address::generate(&ctx.env);
+    let receiver3 = Address::generate(&ctx.env);
+
+    let total_amount = 3000_i128;
+    ctx.token.mint(&sender, &total_amount);
+
+    let mut requests = soroban_sdk::Vec::new(&ctx.env);
+    requests.push_back(StreamRequest {
+        receiver: receiver1.clone(),
+        amount: 1000,
+        start_time: 0,
+        cliff_time: 100,
+        end_time: 1000,
+    });
+    requests.push_back(StreamRequest {
+        receiver: receiver2.clone(),
+        amount: 1500,
+        start_time: 0,
+        cliff_time: 100,
+        end_time: 1000,
+    });
+    requests.push_back(StreamRequest {
+        receiver: receiver3.clone(),
+        amount: 500,
+        start_time: 0,
+        cliff_time: 100,
+        end_time: 1000,
+    });
+
+    let stream_ids = ctx
+        .client
+        .create_batch_streams(&sender, &ctx.token_id, &requests);
+
+    assert_eq!(stream_ids.len(), 3);
+    assert_eq!(stream_ids.get(0).unwrap(), 1);
+    assert_eq!(stream_ids.get(1).unwrap(), 2);
+    assert_eq!(stream_ids.get(2).unwrap(), 3);
+
+    let token_client = token::Client::new(&ctx.env, &ctx.token_id);
+    assert_eq!(token_client.balance(&ctx.contract_id), 3000);
+}
+
+#[test]
+#[should_panic(expected = "Contract is paused")]
+fn test_pause_blocks_create_stream() {
+    let ctx = setup_test();
+    let admin = Address::generate(&ctx.env);
+    let sender = Address::generate(&ctx.env);
+    let receiver = Address::generate(&ctx.env);
+
+    ctx.client.initialize(&admin);
+    ctx.client.set_pause(&admin, &true);
+
+    ctx.token.mint(&sender, &1000);
+    ctx.client
+        .create_stream(&sender, &receiver, &ctx.token_id, &1000, &0, &100, &1000);
+}
+
+#[test]
+#[should_panic(expected = "Contract is paused")]
+fn test_pause_blocks_withdraw() {
+    let ctx = setup_test();
+    let admin = Address::generate(&ctx.env);
+    let sender = Address::generate(&ctx.env);
+    let receiver = Address::generate(&ctx.env);
+
+    ctx.client.initialize(&admin);
+    ctx.token.mint(&sender, &1000);
+    let stream_id =
+        ctx.client
+            .create_stream(&sender, &receiver, &ctx.token_id, &1000, &0, &100, &1000);
+
+    ctx.client.set_pause(&admin, &true);
+
+    ctx.env.ledger().set(soroban_sdk::testutils::LedgerInfo {
+        timestamp: 500,
+        protocol_version: 22,
+        sequence_number: 1,
+        network_id: [0u8; 32],
+        base_reserve: 0,
+        min_temp_entry_ttl: 0,
+        min_persistent_entry_ttl: 0,
+        max_entry_ttl: 1000000,
+    });
+
+    ctx.client.withdraw(&stream_id, &receiver);
+}
+
+#[test]
+#[should_panic(expected = "Fee cannot exceed 10%")]
+fn test_fee_cap() {
+    let ctx = setup_test();
+    let admin = Address::generate(&ctx.env);
+    let treasury = Address::generate(&ctx.env);
+
+    ctx.client.initialize_fee(&admin, &1001, &treasury);
+}
+
+#[test]
+fn test_update_fee() {
+    let ctx = setup_test();
+    let admin = Address::generate(&ctx.env);
+    let treasury = Address::generate(&ctx.env);
+
+    ctx.client.initialize_fee(&admin, &100, &treasury);
+    ctx.client.update_fee(&admin, &200);
+}
+
+#[test]
+#[should_panic(expected = "No funds available to withdraw at this time")]
+fn test_cliff_blocks_withdrawal() {
+    let ctx = setup_test();
+    let sender = Address::generate(&ctx.env);
+    let receiver = Address::generate(&ctx.env);
+
+    ctx.token.mint(&sender, &1000);
+    let stream_id =
+        ctx.client
+            .create_stream(&sender, &receiver, &ctx.token_id, &1000, &0, &500, &1000);
+
+    ctx.env.ledger().set(soroban_sdk::testutils::LedgerInfo {
+        timestamp: 250,
+        protocol_version: 22,
+        sequence_number: 1,
+        network_id: [0u8; 32],
+        base_reserve: 0,
+        min_temp_entry_ttl: 0,
+        min_persistent_entry_ttl: 0,
+        max_entry_ttl: 1000000,
+    });
+
+    ctx.client.withdraw(&stream_id, &receiver);
+}
+
+#[test]
+fn test_cliff_unlocks_at_cliff_time() {
+    let ctx = setup_test();
+    let sender = Address::generate(&ctx.env);
+    let receiver = Address::generate(&ctx.env);
+
+    ctx.token.mint(&sender, &1000);
+    let stream_id =
+        ctx.client
+            .create_stream(&sender, &receiver, &ctx.token_id, &1000, &0, &500, &1000);
+
+    ctx.env.ledger().set(soroban_sdk::testutils::LedgerInfo {
+        timestamp: 500,
+        protocol_version: 22,
+        sequence_number: 1,
+        network_id: [0u8; 32],
+        base_reserve: 0,
+        min_temp_entry_ttl: 0,
+        min_persistent_entry_ttl: 0,
+        max_entry_ttl: 1000000,
+    });
+
+    ctx.client.withdraw(&stream_id, &receiver);
+}
+
+#[test]
+fn test_unpause_allows_operations() {
+    let ctx = setup_test();
+    let admin = Address::generate(&ctx.env);
+    let sender = Address::generate(&ctx.env);
+    let receiver = Address::generate(&ctx.env);
+
+    ctx.client.initialize(&admin);
+    ctx.client.set_pause(&admin, &true);
+    ctx.client.set_pause(&admin, &false);
+
+    ctx.token.mint(&sender, &1000);
+    let stream_id =
+        ctx.client
+            .create_stream(&sender, &receiver, &ctx.token_id, &1000, &0, &100, &1000);
+
+    ctx.env.ledger().set(soroban_sdk::testutils::LedgerInfo {
+        timestamp: 500,
+        protocol_version: 22,
+        sequence_number: 1,
+        network_id: [0u8; 32],
+        base_reserve: 0,
+        min_temp_entry_ttl: 0,
+        min_persistent_entry_ttl: 0,
+        max_entry_ttl: 1000000,
+    });
+
+    assert_eq!(stream_id, 1);
+    let withdrawn = ctx.client.withdraw(&stream_id, &receiver);
+    assert_eq!(withdrawn, 500);
+}
+
+#[test]
+#[should_panic(expected = "Cliff time must be between start and end time")]
+fn test_invalid_cliff_time() {
+    let ctx = setup_test();
+    let sender = Address::generate(&ctx.env);
+    let receiver = Address::generate(&ctx.env);
+
+    ctx.token.mint(&sender, &1000);
+    ctx.client
+        .create_stream(&sender, &receiver, &ctx.token_id, &1000, &100, &50, &200);
 }

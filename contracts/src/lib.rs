@@ -1,26 +1,77 @@
 #![no_std]
 
 pub mod math;
+mod test;
 mod types;
 
-#[cfg(test)]
-mod test;
+use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Env, Vec};
+pub use types::{DataKey, Stream, StreamRequest};
 
-use soroban_sdk::{contract, contractimpl, token, Address, Env};
-pub use types::{DataKey, Stream};
+const THRESHOLD: u32 = 518400; // ~30 days
+const LIMIT: u32 = 1036800; // ~60 days
 
 #[contract]
-pub struct StreamingContract;
+pub struct StellarStream;
 
 #[contractimpl]
-impl StreamingContract {
-    /// Initialize the contract with an admin
+impl StellarStream {
+    pub fn initialize_fee(env: Env, admin: Address, fee_bps: u32, treasury: Address) {
+        admin.require_auth();
+        if fee_bps > 1000 {
+            panic!("Fee cannot exceed 10%");
+        }
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::FeeBps, &fee_bps);
+        env.storage().instance().set(&DataKey::Treasury, &treasury);
+    }
+
+    pub fn update_fee(env: Env, admin: Address, fee_bps: u32) {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Admin not set");
+        if admin != stored_admin {
+            panic!("Unauthorized: Only admin can update fee");
+        }
+        if fee_bps > 1000 {
+            panic!("Fee cannot exceed 10%");
+        }
+        env.storage().instance().set(&DataKey::FeeBps, &fee_bps);
+    }
+
     pub fn initialize(env: Env, admin: Address) {
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::IsPaused, &false);
     }
 
-    /// Create a new payment stream
+    pub fn set_pause(env: Env, admin: Address, paused: bool) {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Admin not set");
+        if admin != stored_admin {
+            panic!("Unauthorized: Only admin can pause");
+        }
+        env.storage().instance().set(&DataKey::IsPaused, &paused);
+    }
+
+    fn check_not_paused(env: &Env) {
+        let is_paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::IsPaused)
+            .unwrap_or(false);
+        if is_paused {
+            panic!("Contract is paused");
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub fn create_stream(
         env: Env,
         sender: Address,
@@ -28,213 +79,251 @@ impl StreamingContract {
         token: Address,
         amount: i128,
         start_time: u64,
+        cliff_time: u64,
         end_time: u64,
     ) -> u64 {
+        Self::check_not_paused(&env);
         sender.require_auth();
 
-        // Validation
-        if amount <= 0 {
-            panic!("Amount must be positive");
-        }
         if end_time <= start_time {
             panic!("End time must be after start time");
         }
+        if cliff_time < start_time || cliff_time >= end_time {
+            panic!("Cliff time must be between start and end time");
+        }
+        if amount <= 0 {
+            panic!("Amount must be greater than zero");
+        }
 
-        // Generate stream ID
-        let stream_id = env.ledger().sequence() as u64;
+        let token_client = token::Client::new(&env, &token);
+        let fee_bps: u32 = env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0);
+        let fee_amount = (amount * fee_bps as i128) / 10000;
+        let principal = amount - fee_amount;
 
-        // Create stream
+        token_client.transfer(&sender, &env.current_contract_address(), &principal);
+
+        if fee_amount > 0 {
+            let treasury: Address = env
+                .storage()
+                .instance()
+                .get(&DataKey::Treasury)
+                .expect("Treasury not set");
+            token_client.transfer(&sender, &treasury, &fee_amount);
+        }
+
+        let mut stream_id: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::StreamId)
+            .unwrap_or(0);
+        stream_id += 1;
+        env.storage().instance().set(&DataKey::StreamId, &stream_id);
+        env.storage().instance().extend_ttl(THRESHOLD, LIMIT);
+
         let stream = Stream {
             sender: sender.clone(),
             receiver,
-            token: token.clone(),
-            amount,
+            token,
+            amount: principal,
             start_time,
+            cliff_time,
             end_time,
             withdrawn_amount: 0,
         };
 
-        // Store stream
+        let stream_key = DataKey::Stream(stream_id);
+        env.storage().persistent().set(&stream_key, &stream);
         env.storage()
             .persistent()
-            .set(&DataKey::Stream(stream_id), &stream);
+            .extend_ttl(&stream_key, THRESHOLD, LIMIT);
 
-        // Transfer tokens from sender to contract
-        let client = token::Client::new(&env, &token);
-        client.transfer(&sender, &env.current_contract_address(), &amount);
+        env.events()
+            .publish((symbol_short!("create"), sender), stream_id);
 
         stream_id
     }
 
-    /// Withdraw unlocked tokens from a stream (with re-entrancy protection)
-    pub fn withdraw(env: Env, stream_id: u64, receiver: Address) -> i128 {
-        receiver.require_auth();
-
-        // Re-entrancy guard: Check if locked
-        if Self::is_locked(&env) {
-            panic!("Re-entrancy detected");
-        }
-
-        // Set lock
-        Self::set_lock(&env, true);
-
-        // Execute withdrawal logic
-        let withdrawn = Self::withdraw_internal(&env, stream_id, &receiver);
-
-        // Release lock
-        Self::set_lock(&env, false);
-
-        withdrawn
-    }
-
-    /// Cancel a stream and return remaining tokens (with re-entrancy protection)
-    pub fn cancel_stream(env: Env, stream_id: u64, sender: Address) -> i128 {
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_batch_streams(
+        env: Env,
+        sender: Address,
+        token: Address,
+        requests: Vec<StreamRequest>,
+    ) -> Vec<u64> {
         sender.require_auth();
 
-        // Re-entrancy guard: Check if locked
-        if Self::is_locked(&env) {
-            panic!("Re-entrancy detected");
+        let mut total_amount: i128 = 0;
+        for request in requests.iter() {
+            if request.end_time <= request.start_time {
+                panic!("End time must be after start time");
+            }
+            if request.amount <= 0 {
+                panic!("Amount must be greater than zero");
+            }
+            total_amount += request.amount;
         }
 
-        // Set lock
-        Self::set_lock(&env, true);
+        let token_client = token::Client::new(&env, &token);
+        token_client.transfer(&sender, &env.current_contract_address(), &total_amount);
 
-        // Execute cancellation logic
-        let returned = Self::cancel_stream_internal(&env, stream_id, &sender);
+        let mut stream_ids = Vec::new(&env);
+        let mut stream_id: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::StreamId)
+            .unwrap_or(0);
 
-        // Release lock
-        Self::set_lock(&env, false);
+        for request in requests.iter() {
+            stream_id += 1;
 
-        returned
+            let stream = Stream {
+                sender: sender.clone(),
+                receiver: request.receiver.clone(),
+                token: token.clone(),
+                amount: request.amount,
+                start_time: request.start_time,
+                cliff_time: request.cliff_time,
+                end_time: request.end_time,
+                withdrawn_amount: 0,
+            };
+
+            env.storage()
+                .persistent()
+                .set(&DataKey::Stream(stream_id), &stream);
+
+            env.events()
+                .publish((symbol_short!("create"), sender.clone()), stream_id);
+
+            stream_ids.push_back(stream_id);
+        }
+
+        env.storage().instance().set(&DataKey::StreamId, &stream_id);
+
+        stream_ids
     }
 
-    /// Get stream details
-    pub fn get_stream(env: Env, stream_id: u64) -> Stream {
+    pub fn withdraw(env: Env, stream_id: u64, receiver: Address) -> i128 {
+        Self::check_not_paused(&env);
+        receiver.require_auth();
+
+        let stream_key = DataKey::Stream(stream_id);
+        let mut stream: Stream = env
+            .storage()
+            .persistent()
+            .get(&stream_key)
+            .expect("Stream does not exist");
+
+        if receiver != stream.receiver {
+            panic!("Unauthorized: You are not the receiver of this stream");
+        }
+
+        let now = env.ledger().timestamp();
+        let total_unlocked = math::calculate_unlocked(
+            stream.amount,
+            stream.start_time,
+            stream.cliff_time,
+            stream.end_time,
+            now,
+        );
+
+        let withdrawable_amount = total_unlocked - stream.withdrawn_amount;
+
+        if withdrawable_amount <= 0 {
+            panic!("No funds available to withdraw at this time");
+        }
+
+        let token_client = token::Client::new(&env, &stream.token);
+        token_client.transfer(
+            &env.current_contract_address(),
+            &receiver,
+            &withdrawable_amount,
+        );
+
+        stream.withdrawn_amount += withdrawable_amount;
+        env.storage().persistent().set(&stream_key, &stream);
         env.storage()
             .persistent()
-            .get(&DataKey::Stream(stream_id))
-            .unwrap_or_else(|| panic!("Stream not found"))
+            .extend_ttl(&stream_key, THRESHOLD, LIMIT);
+
+        env.events().publish(
+            (symbol_short!("withdraw"), receiver),
+            (stream_id, withdrawable_amount),
+        );
+
+        withdrawable_amount
     }
 
-    /// Calculate withdrawable amount for a stream
-    pub fn get_withdrawable(env: Env, stream_id: u64) -> i128 {
+    pub fn cancel_stream(env: Env, stream_id: u64) {
+        Self::check_not_paused(&env);
+        let stream_key = DataKey::Stream(stream_id);
         let stream: Stream = env
             .storage()
             .persistent()
-            .get(&DataKey::Stream(stream_id))
-            .unwrap_or_else(|| panic!("Stream not found"));
+            .get(&stream_key)
+            .expect("Stream does not exist");
 
-        let current_time = env.ledger().timestamp();
-        let unlocked = math::calculate_unlocked_amount(
+        stream.sender.require_auth();
+
+        let now = env.ledger().timestamp();
+
+        if now >= stream.end_time {
+            panic!("Stream has already completed and cannot be cancelled");
+        }
+
+        let total_unlocked = math::calculate_unlocked(
             stream.amount,
             stream.start_time,
+            stream.cliff_time,
             stream.end_time,
-            current_time,
+            now,
         );
 
-        math::calculate_withdrawable_amount(unlocked, stream.withdrawn_amount)
+        let withdrawable_to_receiver = total_unlocked - stream.withdrawn_amount;
+        let refund_to_sender = stream.amount - total_unlocked;
+
+        let token_client = token::Client::new(&env, &stream.token);
+        let contract_address = env.current_contract_address();
+
+        if withdrawable_to_receiver > 0 {
+            token_client.transfer(
+                &contract_address,
+                &stream.receiver,
+                &withdrawable_to_receiver,
+            );
+        }
+
+        if refund_to_sender > 0 {
+            token_client.transfer(&contract_address, &stream.sender, &refund_to_sender);
+        }
+
+        env.storage().persistent().remove(&stream_key);
+
+        env.events()
+            .publish((symbol_short!("cancel"), stream_id), stream.sender);
     }
 
-    // ========== Internal Functions ==========
-
-    fn withdraw_internal(env: &Env, stream_id: u64, receiver: &Address) -> i128 {
+    pub fn transfer_receiver(env: Env, stream_id: u64, new_receiver: Address) {
         let mut stream: Stream = env
             .storage()
             .persistent()
             .get(&DataKey::Stream(stream_id))
-            .unwrap_or_else(|| panic!("Stream not found"));
+            .expect("Stream does not exist");
 
-        // Verify receiver
-        if stream.receiver != *receiver {
-            panic!("Unauthorized: not the receiver");
-        }
+        stream.receiver.require_auth();
 
-        // Calculate withdrawable amount
-        let current_time = env.ledger().timestamp();
-        let unlocked = math::calculate_unlocked_amount(
-            stream.amount,
-            stream.start_time,
-            stream.end_time,
-            current_time,
-        );
-        let withdrawable = math::calculate_withdrawable_amount(unlocked, stream.withdrawn_amount);
-
-        if withdrawable <= 0 {
-            panic!("No tokens available to withdraw");
-        }
-
-        // Update stream state
-        stream.withdrawn_amount += withdrawable;
+        stream.receiver = new_receiver.clone();
         env.storage()
             .persistent()
             .set(&DataKey::Stream(stream_id), &stream);
 
-        // Transfer tokens to receiver
-        let client = token::Client::new(env, &stream.token);
-        client.transfer(&env.current_contract_address(), receiver, &withdrawable);
-
-        withdrawable
+        env.events()
+            .publish((symbol_short!("transfer"), stream_id), new_receiver);
     }
 
-    fn cancel_stream_internal(env: &Env, stream_id: u64, sender: &Address) -> i128 {
-        let stream: Stream = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Stream(stream_id))
-            .unwrap_or_else(|| panic!("Stream not found"));
-
-        // Verify sender
-        if stream.sender != *sender {
-            panic!("Unauthorized: not the sender");
-        }
-
-        // Calculate amounts
-        let current_time = env.ledger().timestamp();
-        let unlocked = math::calculate_unlocked_amount(
-            stream.amount,
-            stream.start_time,
-            stream.end_time,
-            current_time,
-        );
-        let withdrawable = math::calculate_withdrawable_amount(unlocked, stream.withdrawn_amount);
-        let remaining = stream.amount - stream.withdrawn_amount;
-
-        // Transfer withdrawable to receiver if any
-        let client = token::Client::new(env, &stream.token);
-        if withdrawable > 0 {
-            client.transfer(&env.current_contract_address(), &stream.receiver, &withdrawable);
-        }
-
-        // Return remaining to sender
-        let to_return = remaining - withdrawable;
-        if to_return > 0 {
-            client.transfer(&env.current_contract_address(), sender, &to_return);
-        }
-
-        // Delete stream
-        env.storage().persistent().remove(&DataKey::Stream(stream_id));
-
-        to_return
-    }
-
-    // ========== Re-entrancy Guard Functions ==========
-
-    fn is_locked(env: &Env) -> bool {
+    pub fn extend_stream_ttl(env: Env, stream_id: u64) {
+        let stream_key = DataKey::Stream(stream_id);
         env.storage()
-            .temporary()
-            .get(&DataKey::ReentrancyLock)
-            .unwrap_or(false)
-    }
-
-    fn set_lock(env: &Env, locked: bool) {
-        if locked {
-            env.storage()
-                .temporary()
-                .set(&DataKey::ReentrancyLock, &locked);
-        } else {
-            env.storage()
-                .temporary()
-                .remove(&DataKey::ReentrancyLock);
-        }
+            .persistent()
+            .extend_ttl(&stream_key, THRESHOLD, LIMIT);
     }
 }
