@@ -81,65 +81,6 @@ impl StellarStream {
 
     /// Optimized withdraw function - most frequently called
     /// Minimizes storage reads and uses inlined math functions
-    pub fn withdraw(env: Env, stream_id: u64, receiver: Address) -> i128 {
-        Self::check_not_paused(&env);
-        receiver.require_auth();
-
-        let stream_key = DataKey::Stream(stream_id);
-        let mut stream: Stream = env
-            .storage()
-            .persistent()
-            .get(&stream_key)
-            .expect("Stream does not exist");
-
-        // Early validation to fail fast
-        if receiver != stream.receiver {
-            panic!("Unauthorized: You are not the receiver of this stream");
-        }
-
-        // Get current time once
-        let now = env.ledger().timestamp();
-
-        // Use inlined math function for performance
-        let total_unlocked = math::calculate_unlocked(
-            stream.amount,
-            stream.start_time,
-            stream.cliff_time,
-            stream.end_time,
-            now,
-        );
-
-        let withdrawable_amount = total_unlocked - stream.withdrawn_amount;
-
-        // Early return if nothing to withdraw
-        if withdrawable_amount <= 0 {
-            panic!("No funds available to withdraw at this time");
-        }
-
-        // Perform token transfer
-        let token_client = token::Client::new(&env, &stream.token);
-        token_client.transfer(
-            &env.current_contract_address(),
-            &receiver,
-            &withdrawable_amount,
-        );
-
-        // Update state
-        stream.withdrawn_amount += withdrawable_amount;
-        env.storage().persistent().set(&stream_key, &stream);
-        env.storage()
-            .persistent()
-            .extend_ttl(&stream_key, THRESHOLD, LIMIT);
-
-        // Emit event
-        env.events().publish(
-            (symbol_short!("withdraw"), receiver),
-            (stream_id, withdrawable_amount),
-        );
-
-        withdrawable_amount
-    }
-
     /// Optimized create_stream with better fee calculation
     #[allow(clippy::too_many_arguments)]
     pub fn create_stream(
