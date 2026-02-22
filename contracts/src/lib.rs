@@ -9,9 +9,9 @@ use errors::Error;
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Env, Vec};
 use storage::{PROPOSAL_COUNT, RECEIPT, STREAM_COUNT};
 use types::{
-    Milestone, ProposalApprovedEvent, ProposalCreatedEvent, ReceiptMetadata,
-    ReceiptTransferredEvent, Stream, StreamCancelledEvent, StreamClaimEvent, StreamCreatedEvent,
-    StreamPausedEvent, StreamProposal, StreamReceipt, StreamUnpausedEvent,
+    DataKey, Milestone, ProposalApprovedEvent, ProposalCreatedEvent, ReceiptMetadata,
+    ReceiptTransferredEvent, Role, Stream, StreamCancelledEvent, StreamClaimEvent,
+    StreamCreatedEvent, StreamPausedEvent, StreamProposal, StreamReceipt, StreamUnpausedEvent,
 };
 
 #[contract]
@@ -629,6 +629,87 @@ impl StellarStreamContract {
         } else {
             milestone_cap
         }
+    }
+
+    // ========== RBAC Functions ==========
+
+    /// Grant a role to an address (Admin only)
+    pub fn grant_role(env: Env, admin: Address, target: Address, role: Role) {
+        admin.require_auth();
+
+        // Check if caller has Admin role
+        if !Self::has_role(&env, &admin, Role::Admin) {
+            panic!("Unauthorized: Only Admin can grant roles");
+        }
+
+        // Grant the role
+        env.storage()
+            .instance()
+            .set(&DataKey::Role(target.clone(), role.clone()), &true);
+
+        // Emit event
+        env.events().publish((symbol_short!("grant"), target), role);
+    }
+
+    /// Revoke a role from an address (Admin only)
+    pub fn revoke_role(env: Env, admin: Address, target: Address, role: Role) {
+        admin.require_auth();
+
+        // Check if caller has Admin role
+        if !Self::has_role(&env, &admin, Role::Admin) {
+            panic!("Unauthorized: Only Admin can revoke roles");
+        }
+
+        // Revoke the role
+        env.storage()
+            .instance()
+            .remove(&DataKey::Role(target.clone(), role.clone()));
+
+        // Emit event
+        env.events()
+            .publish((symbol_short!("revoke"), target), role);
+    }
+
+    /// Check if an address has a specific role
+    pub fn check_role(env: Env, address: Address, role: Role) -> bool {
+        Self::has_role(&env, &address, role)
+    }
+
+    /// Internal helper to check if an address has a role
+    fn has_role(env: &Env, address: &Address, role: Role) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Role(address.clone(), role))
+            .unwrap_or(false)
+    }
+
+    // ========== Contract Upgrade Functions ==========
+
+    /// Upgrade the contract to a new WASM hash
+    /// Only addresses with Admin role can perform this operation
+    pub fn upgrade(env: Env, admin: Address, new_wasm_hash: soroban_sdk::BytesN<32>) {
+        admin.require_auth();
+
+        // Check if caller has Admin role
+        if !Self::has_role(&env, &admin, Role::Admin) {
+            panic!("Unauthorized: Only Admin can upgrade contract");
+        }
+
+        // Update the contract WASM
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+
+        // Emit upgrade event with new WASM hash
+        env.events()
+            .publish((symbol_short!("upgrade"), admin), new_wasm_hash);
+    }
+
+    /// Get the current admin address (for backward compatibility)
+    pub fn get_admin(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Admin not set")
     }
 }
 
@@ -1367,33 +1448,5 @@ mod test {
         // Second approval - should emit approve event and create stream
         client.approve_proposal(&proposal_id, &approver2);
         // Event verification would be done through event monitoring in integration tests
-    }
-
-    /// Upgrade the contract to a new WASM hash
-    /// Upgrade the contract to a new WASM hash
-    /// Only addresses with Admin role can perform this operation
-    pub fn upgrade(env: Env, admin: Address, new_wasm_hash: soroban_sdk::BytesN<32>) {
-        admin.require_auth();
-
-        // Check if caller has Admin role
-        if !Self::has_role(&env, &admin, Role::Admin) {
-            panic!("Unauthorized: Only Admin can upgrade contract");
-        }
-
-        // Update the contract WASM
-        env.deployer()
-            .update_current_contract_wasm(new_wasm_hash.clone());
-
-        // Emit upgrade event with new WASM hash
-        env.events()
-            .publish((symbol_short!("upgrade"), admin), new_wasm_hash);
-    }
-
-    /// Get the current admin address (for backward compatibility)
-    pub fn get_admin(env: Env) -> Address {
-        env.storage()
-            .instance()
-            .get(&DataKey::Admin)
-            .expect("Admin not set")
     }
 }

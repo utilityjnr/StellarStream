@@ -105,6 +105,7 @@ pub enum DataKey {
     ReentrancyLock,
     ContractVersion,        // Tracks current contract version
     MigrationExecuted(u32), // Tracks which migrations have been executed
+    Role(Address, Role),    // RBAC: stores role assignments
 }
 
 #[contracttype]
