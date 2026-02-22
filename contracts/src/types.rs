@@ -16,6 +16,13 @@ pub const INTEREST_SPLIT_SENDER_RECEIVER: u32 = 0b011; // 3: 50/50 sender/receiv
 pub const INTEREST_SPLIT_ALL: u32 = 0b111; // 7: 33/33/33 split
 
 #[contracttype]
+#[derive(Clone, PartialEq)]
+pub enum CurveType {
+    Linear = 0,
+    Exponential = 1,
+}
+
+#[contracttype]
 #[derive(Clone)]
 pub struct Milestone {
     pub timestamp: u64,
@@ -39,6 +46,7 @@ pub struct Stream {
     pub paused_time: u64,
     pub total_paused_duration: u64,
     pub milestones: Vec<Milestone>,
+    pub curve_type: CurveType,
     pub interest_strategy: u32, // Strategy for interest distribution
     pub vault_address: Option<Address>, // Optional vault for yield generation
     pub deposited_principal: i128, // Amount deposited in vault (for tracking)
