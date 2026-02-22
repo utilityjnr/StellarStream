@@ -17,4 +17,9 @@ pub enum Error {
     InvalidApprovalThreshold = 12,
     NotReceiptOwner = 13,
     StreamPaused = 14,
+    OracleStalePrice = 15,
+    OracleFailed = 16,
+    PriceOutOfBounds = 17,
+    FlashLoanNotRepaid = 18,
+    FlashLoanInProgress = 19,
 }
