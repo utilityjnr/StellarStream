@@ -102,9 +102,6 @@
                       ]
                     }
                   ]
-                },
-                {
-                  "u32": 0
                 }
               ]
             }
@@ -306,10 +303,13 @@
                             },
                             {
                               "key": {
-                                "symbol": "curve_type"
+                                "symbol": "deposited_principal"
                               },
                               "val": {
-                                "u32": 0
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1000
+                                }
                               }
                             },
                             {
@@ -322,11 +322,25 @@
                             },
                             {
                               "key": {
+                                "symbol": "interest_strategy"
+                              },
+                              "val": {
+                                "u32": 0
+                              }
+                            },
+                            {
+                              "key": {
                                 "symbol": "is_paused"
                               },
                               "val": {
                                 "bool": false
                               }
+                            },
+                            {
+                              "key": {
+                                "symbol": "metadata"
+                              },
+                              "val": "void"
                             },
                             {
                               "key": {
@@ -426,7 +440,24 @@
                             },
                             {
                               "key": {
+                                "symbol": "vault_address"
+                              },
+                              "val": "void"
+                            },
+                            {
+                              "key": {
                                 "symbol": "withdrawn"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 0
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "withdrawn_amount"
                               },
                               "val": {
                                 "i128": {
