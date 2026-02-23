@@ -27,4 +27,6 @@ pub enum Error {
     StreamIsSoulbound = 21,
     /// Stream is frozen pending dispute resolution
     StreamFrozen = 22,
+    /// Token not in allowlist
+    TokenNotAllowed = 23,
 }
