@@ -81,6 +81,9 @@
                 },
                 {
                   "u32": 1
+                },
+                {
+                  "bool": false
                 }
               ]
             }
@@ -340,6 +343,14 @@
                             {
                               "key": {
                                 "symbol": "is_paused"
+                              },
+                              "val": {
+                                "bool": false
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "is_soulbound"
                               },
                               "val": {
                                 "bool": false

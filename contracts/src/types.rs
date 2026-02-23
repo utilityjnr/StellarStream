@@ -83,6 +83,13 @@ pub struct Stream {
     pub oracle_max_staleness: u64,
     pub price_min: i128,
     pub price_max: i128,
+    /// If true, this stream is permanently locked to the original receiver.
+    /// The receiver cannot be transferred for any reason. Used for identity-based
+    /// rewards, grants, or compliance-locked distributions.
+    /// Default: false (for backward compatibility with existing streams)
+    /// Note: We use bool instead of Option<bool> to avoid storage overhead and
+    /// ensure explicit default behavior. All existing streams default to false.
+    pub is_soulbound: bool,
 }
 
 // Legacy Stream struct (v1) - for migration example
@@ -137,6 +144,7 @@ pub enum DataKey {
     ContractVersion,        // Tracks current contract version
     MigrationExecuted(u32), // Tracks which migrations have been executed
     Role(Address, Role),    // RBAC: stores role assignments
+    SoulboundStreams,       // Vec<u64> of all soulbound stream IDs
 }
 
 #[contracttype]
