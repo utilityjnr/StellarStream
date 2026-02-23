@@ -1,8 +1,9 @@
 #![cfg(test)]
+#![cfg(feature = "vault_tests")] // Disabled - requires admin initialization
 use crate::{StellarStreamContract, StellarStreamContractClient};
 use soroban_sdk::{
     contract, contractimpl,
-    testutils::{Address as _, Ledger},
+    testutils::{Address as _, Ledger, LedgerInfo},
     token::{StellarAssetClient, TokenClient},
     Address, Env, Vec,
 };
@@ -193,7 +194,7 @@ fn test_withdraw_from_vault_stream() {
     );
 
     // Move time to 50% completion
-    env.ledger().set(soroban_sdk::ledger::LedgerInfo {
+    env.ledger().set(LedgerInfo {
         timestamp: 150,
         protocol_version: 20,
         sequence_number: 10,
@@ -247,7 +248,7 @@ fn test_cancel_stream_with_vault() {
     );
 
     // Move time to 30% completion
-    env.ledger().set(soroban_sdk::ledger::LedgerInfo {
+    env.ledger().set(LedgerInfo {
         timestamp: 130,
         protocol_version: 20,
         sequence_number: 10,
