@@ -81,6 +81,9 @@
                 },
                 {
                   "u32": 0
+                },
+                {
+                  "bool": false
                 }
               ]
             }
@@ -340,6 +343,14 @@
                               },
                               "val": {
                                 "bool": true
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "is_soulbound"
+                              },
+                              "val": {
+                                "bool": false
                               }
                             },
                             {

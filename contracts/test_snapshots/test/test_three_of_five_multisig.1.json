@@ -513,6 +513,14 @@
                             },
                             {
                               "key": {
+                                "symbol": "is_soulbound"
+                              },
+                              "val": {
+                                "bool": false
+                              }
+                            },
+                            {
+                              "key": {
                                 "symbol": "is_usd_pegged"
                               },
                               "val": {

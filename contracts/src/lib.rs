@@ -8,6 +8,9 @@ mod oracle;
 mod storage;
 mod types;
 
+#[cfg(test)]
+mod soulbound_test;
+
 use errors::Error;
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Env, Vec};
 use storage::{PROPOSAL_COUNT, RECEIPT, STREAM_COUNT};
@@ -178,6 +181,7 @@ impl StellarStreamContract {
             oracle_max_staleness: 0,
             price_min: 0,
             price_max: 0,
+            is_soulbound: false, // Proposals default to non-soulbound
         };
 
         env.storage()
@@ -204,6 +208,11 @@ impl StellarStreamContract {
         Ok(stream_id)
     }
 
+    /// Create a new stream with optional soulbound locking
+    /// 
+    /// # Parameters
+    /// - `is_soulbound`: Set to true to permanently bind this stream to the receiver's address.
+    ///   Cannot be changed after stream creation. Irreversible.
     pub fn create_stream(
         env: Env,
         sender: Address,
@@ -213,6 +222,7 @@ impl StellarStreamContract {
         start_time: u64,
         end_time: u64,
         curve_type: CurveType,
+        is_soulbound: bool,
     ) -> Result<u64, Error> {
         let milestones = Vec::new(&env);
         Self::create_stream_with_milestones(
@@ -225,9 +235,15 @@ impl StellarStreamContract {
             end_time,
             milestones,
             curve_type,
+            is_soulbound,
         )
     }
 
+    /// Create a new stream with milestones and optional soulbound locking
+    /// 
+    /// # Parameters
+    /// - `is_soulbound`: Set to true to permanently bind this stream to the receiver's address.
+    ///   Cannot be changed after stream creation. Irreversible.
     pub fn create_stream_with_milestones(
         env: Env,
         sender: Address,
@@ -238,6 +254,7 @@ impl StellarStreamContract {
         end_time: u64,
         milestones: Vec<Milestone>,
         curve_type: CurveType,
+        is_soulbound: bool,
     ) -> Result<u64, Error> {
         sender.require_auth();
 
@@ -280,12 +297,32 @@ impl StellarStreamContract {
             oracle_max_staleness: 0,
             price_min: 0,
             price_max: 0,
+            is_soulbound,
         };
 
         env.storage()
             .instance()
             .set(&(STREAM_COUNT, stream_id), &stream);
         env.storage().instance().set(&STREAM_COUNT, &next_id);
+
+        // If soulbound, emit event and add to index
+        if is_soulbound {
+            env.events().publish(
+                (symbol_short!("soulbound"), symbol_short!("locked")),
+                (stream_id, receiver.clone()),
+            );
+
+            // Add to soulbound streams index
+            let mut soulbound_streams: Vec<u64> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::SoulboundStreams)
+                .unwrap_or(Vec::new(&env));
+            soulbound_streams.push_back(stream_id);
+            env.storage()
+                .persistent()
+                .set(&DataKey::SoulboundStreams, &soulbound_streams);
+        }
 
         env.events().publish(
             (symbol_short!("create"), sender.clone()),
@@ -373,6 +410,7 @@ impl StellarStreamContract {
             oracle_max_staleness: max_staleness,
             price_min: min_price,
             price_max: max_price,
+            is_soulbound: false, // USD-pegged streams default to non-soulbound
         };
 
         env.storage()
@@ -537,6 +575,66 @@ impl StellarStreamContract {
 
         Ok(())
     }
+
+    /// Transfer stream receiver to a new address
+    /// This changes the actual receiver field, not just the receipt owner
+    /// BLOCKED for soulbound streams - soulbound check precedes all other validation
+    pub fn transfer_receiver(
+        env: Env,
+        stream_id: u64,
+        caller: Address,
+        new_receiver: Address,
+    ) -> Result<(), Error> {
+        caller.require_auth();
+
+        let stream_key = (STREAM_COUNT, stream_id);
+        let mut stream: Stream = env
+            .storage()
+            .instance()
+            .get(&stream_key)
+            .ok_or(Error::StreamNotFound)?;
+
+        // SOULBOUND CHECK FIRST: This is a hard protocol invariant, not a permission check.
+        // Even the sender cannot override this. If a soulbound stream needs to be "transferred",
+        // the correct approach is to cancel it and create a new stream.
+        if stream.is_soulbound {
+            return Err(Error::StreamIsSoulbound);
+        }
+
+        // Authorization check: only sender can transfer receiver
+        if stream.sender != caller {
+            return Err(Error::Unauthorized);
+        }
+
+        if stream.cancelled {
+            return Err(Error::AlreadyCancelled);
+        }
+
+        // Update receiver
+        stream.receiver = new_receiver.clone();
+        env.storage().instance().set(&stream_key, &stream);
+
+        // Emit event
+        env.events().publish(
+            (symbol_short!("transfer"), symbol_short!("receiver")),
+            (stream_id, new_receiver),
+        );
+
+        Ok(())
+    }
+
+    /// Get all soulbound stream IDs
+    /// Useful for indexers and compliance audits
+    pub fn get_soulbound_streams(env: Env) -> Vec<u64> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::SoulboundStreams)
+            .unwrap_or(Vec::new(&env))
+    }
+
+    // SOULBOUND INVARIANT NOTE: If delegate_receiver, assign_stream, or merge_streams
+    // are added in future, they MUST apply the is_soulbound guard before any other logic.
+    // See: Issue #12 - Soulbound streams must remain locked to original receiver under ALL circumstances.
 
     pub fn get_receipt(env: Env, stream_id: u64) -> Result<StreamReceipt, Error> {
         env.storage()
@@ -959,6 +1057,7 @@ impl StellarStreamContract {
             request.start_time,
             request.start_time + request.duration,
             CurveType::Linear,
+            false, // Contributor requests default to non-soulbound
         )?;
         env.events().publish(
             (soroban_sdk::Symbol::new(&env, "RequestExecuted"), request_id),
@@ -1169,6 +1268,7 @@ mod test {
             &100,
             &200,
             &CurveType::Linear,
+            &false,
         );
 
         assert_eq!(stream_id, 0);
@@ -1209,6 +1309,7 @@ mod test {
             &100,
             &200,
             &CurveType::Linear,
+            &false,
         );
 
         client.transfer_receipt(&stream_id, &receiver, &new_owner);
@@ -1246,6 +1347,7 @@ mod test {
             &100,
             &200,
             &CurveType::Linear,
+            &false,
         );
 
         client.transfer_receipt(&stream_id, &receiver, &new_owner);
@@ -1282,6 +1384,7 @@ mod test {
             &100,
             &200,
             &CurveType::Linear,
+            &false,
         );
 
         let metadata = client.get_receipt_metadata(&stream_id);
@@ -1384,6 +1487,7 @@ mod test {
             &100,
             &300,
             &CurveType::Linear,
+            &false,
         );
 
         env.ledger().with_mut(|li| li.timestamp = 150);
@@ -1426,6 +1530,7 @@ mod test {
             &100,
             &300,
             &CurveType::Linear,
+            &false,
         );
 
         client.pause_stream(&stream_id, &sender);
@@ -1461,6 +1566,7 @@ mod test {
             &100,
             &300,
             &CurveType::Linear,
+            &false,
         );
 
         env.ledger().with_mut(|li| li.timestamp = 150);
@@ -1525,6 +1631,7 @@ mod test {
             &360,
             &milestones,
             &CurveType::Linear,
+            &false,
         );
 
         env.ledger().with_mut(|li| li.timestamp = 45);
@@ -1572,6 +1679,7 @@ mod test {
             &200,
             &milestones,
             &CurveType::Linear,
+            &false,
         );
 
         env.ledger().with_mut(|li| li.timestamp = 50);
@@ -1617,6 +1725,7 @@ mod test {
             &100,
             &200,
             &CurveType::Linear,
+            &false,
         );
 
         assert_eq!(stream_id, 0);
@@ -1648,6 +1757,7 @@ mod test {
             &100,
             &200,
             &CurveType::Linear,
+            &false,
         );
 
         // Withdraw - should emit claim event
@@ -1681,6 +1791,7 @@ mod test {
             &100,
             &200,
             &CurveType::Linear,
+            &false,
         );
 
         // Cancel - should emit cancel event
@@ -1713,6 +1824,7 @@ mod test {
             &100,
             &200,
             &CurveType::Linear,
+            &false,
         );
 
         // Transfer receipt - should emit transfer event
@@ -1745,6 +1857,7 @@ mod test {
             &100,
             &300,
             &CurveType::Linear,
+            &false,
         );
 
         // Pause stream - should emit pause event
@@ -1777,6 +1890,7 @@ mod test {
             &100,
             &300,
             &CurveType::Linear,
+            &false,
         );
 
         client.pause_stream(&stream_id, &sender);
@@ -1845,6 +1959,7 @@ mod test {
             &0,
             &100,
             &CurveType::Exponential,
+            &false,
         );
 
         // At 50% time: should have ~25% unlocked (0.5^2 = 0.25)
