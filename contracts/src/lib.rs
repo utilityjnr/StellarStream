@@ -1445,12 +1445,110 @@ impl StellarStreamContract {
 
     /// Get the current admin address (for backward compatibility)
     pub fn get_admin(env: Env) -> Address {
+        // For backward compatibility, return the first address with Admin role
+        // In practice, this should be replaced with proper admin management
         env.storage()
             .instance()
             .get(&DataKey::Admin)
-            .expect("Admin not set")
+            .unwrap_or_else(|| panic!("No admin found"))
     }
 
+    // ========== OFAC Compliance Functions ==========
+
+    /// Restrict an address from receiving streams (Admin only)
+    pub fn restrict_address(env: Env, admin: Address, address: Address) -> Result<(), Error> {
+        admin.require_auth();
+
+        // Check if caller has Admin role
+        if !Self::has_role(&env, &admin, Role::Admin) {
+            return Err(Error::Unauthorized);
+        }
+
+        // Get current restricted addresses
+        let mut restricted: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&RESTRICTED_ADDRESSES)
+            .unwrap_or(Vec::new(&env));
+
+        // Add address if not already restricted
+        if !restricted.contains(&address) {
+            restricted.push_back(address.clone());
+            env.storage()
+                .persistent()
+                .set(&RESTRICTED_ADDRESSES, &restricted);
+        }
+
+        // Emit event
+        env.events().publish(
+            (symbol_short!("restrict"), address.clone()),
+            true,
+        );
+
+        Ok(())
+    }
+
+    /// Remove address restriction (Admin only)
+    pub fn unrestrict_address(env: Env, admin: Address, address: Address) {
+        admin.require_auth();
+
+        // Check if caller has Admin role
+        if !Self::has_role(&env, &admin, Role::Admin) {
+            panic!("{}", Error::Unauthorized as u32);
+        }
+
+        // Get current restricted addresses
+        let mut restricted: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&RESTRICTED_ADDRESSES)
+            .unwrap_or(Vec::new(&env));
+
+        // Remove address if present
+        let mut new_restricted = Vec::new(&env);
+        for addr in restricted.iter() {
+            if addr != address {
+                new_restricted.push_back(addr);
+            }
+        }
+
+        env.storage()
+            .persistent()
+            .set(&RESTRICTED_ADDRESSES, &new_restricted);
+
+        // Emit event
+        env.events().publish(
+            (symbol_short!("unrest"), address.clone()),
+            false,
+        );
+    }
+
+    /// Check if an address is restricted
+    pub fn is_address_restricted(env: Env, address: Address) -> bool {
+        let restricted: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&RESTRICTED_ADDRESSES)
+            .unwrap_or(Vec::new(&env));
+
+        restricted.contains(&address)
+    }
+
+    /// Get list of all restricted addresses
+    pub fn get_restricted_addresses(env: Env) -> Vec<Address> {
+        env.storage()
+            .persistent()
+            .get(&RESTRICTED_ADDRESSES)
+            .unwrap_or(Vec::new(&env))
+    }
+
+    /// Internal helper to validate receiver is not restricted
+    fn validate_receiver(env: &Env, receiver: &Address) -> Result<(), Error> {
+        if Self::is_address_restricted(env.clone(), receiver.clone()) {
+            return Err(Error::AddressRestricted);
+        }
+        Ok(())
+    }
     // --- CONTRIBUTOR PULL-REQUEST PAYMENTS ---
 
     pub fn create_request(
@@ -2603,7 +2701,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "Error(Contract, #20)")]
+    #[should_panic(expected = "Error(Contract, #22)")]
     fn test_cannot_create_stream_to_restricted_address() {
         let env = Env::default();
         env.mock_all_auths();
@@ -2638,12 +2736,12 @@ mod test {
             &100,
             &200,
             &CurveType::Linear,
-            &false,
+            &false, // is_soulbound
         );
     }
 
     #[test]
-    #[should_panic(expected = "Error(Contract, #20)")]
+    #[should_panic(expected = "Error(Contract, #22)")]
     fn test_cannot_create_proposal_to_restricted_address() {
         let env = Env::default();
         env.mock_all_auths();
@@ -2682,11 +2780,12 @@ mod test {
         );
     }
 
-        #[test]
-        #[ignore] // OFAC functions not implemented
-        fn test_unrestrict_address_by_admin() {
-            let env = Env::default();
-            env.mock_all_auths();
+    #[test]
+    #[should_panic(expected = "Error(Contract, #22)")]
+    fn test_cannot_transfer_receipt_to_restricted_address() {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().with_mut(|li| li.timestamp = 100);
 
             let contract_id = env.register(StellarStreamContract, ());
             let client = StellarStreamContractClient::new(&env, &contract_id);
@@ -2717,7 +2816,7 @@ mod test {
             &100,
             &200,
             &CurveType::Linear,
-            &false,
+            &false, // is_soulbound
         );
 
         #[test]
@@ -2970,7 +3069,7 @@ mod test {
             &100,
             &200,
             &CurveType::Linear,
-            &false,
+            &false, // is_soulbound
         );
         
         // Verify stream was created (stream_id >= 0)
