@@ -822,7 +822,7 @@ impl StellarStreamContract {
 
         // Check if caller has Admin role
         if !Self::has_role(&env, &admin, Role::Admin) {
-            panic!("Unauthorized: Only Admin can grant roles");
+            panic!("{}", Error::Unauthorized as u32);
         }
 
         // Grant the role
@@ -840,7 +840,7 @@ impl StellarStreamContract {
 
         // Check if caller has Admin role
         if !Self::has_role(&env, &admin, Role::Admin) {
-            panic!("Unauthorized: Only Admin can revoke roles");
+            return; // Error::Unauthorized;
         }
 
         // Revoke the role
@@ -875,7 +875,7 @@ impl StellarStreamContract {
 
         // Check if caller has Admin role
         if !Self::has_role(&env, &admin, Role::Admin) {
-            panic!("Unauthorized: Only Admin can upgrade contract");
+            return; // Error::Unauthorized;
         }
 
         // Update the contract WASM
