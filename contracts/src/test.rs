@@ -7,9 +7,7 @@ use soroban_sdk::{token, Address, Env};
 #[allow(dead_code)]
 struct TestContext {
     env: Env,
-    contract_id: Address,
     client: StellarStreamClient<'static>,
-    token_admin: Address,
     token: token::StellarAssetClient<'static>,
     token_id: Address,
 }
@@ -24,17 +22,15 @@ fn setup_test() -> TestContext {
 
     let token_admin = Address::generate(&env);
 
-    #[allow(deprecated)]
-    let token_id = env.register_stellar_asset_contract(token_admin.clone());
-    let token = token::StellarAssetClient::new(&env, &token_id);
+    // v22 Change: Use v2 method to avoid deprecation warning
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token = token::StellarAssetClient::new(&env, &token_id.address());
 
     TestContext {
         env,
-        contract_id,
         client,
-        token_admin,
         token,
-        token_id,
+        token_id: token_id.address(),
     }
 }
 
@@ -156,6 +152,8 @@ fn test_protocol_fee() {
     let sender = Address::generate(&ctx.env);
     let receiver = Address::generate(&ctx.env);
 
+    // Initialize contract with admin (grants all roles)
+    ctx.client.initialize(&admin);
     ctx.client.initialize_fee(&admin, &100, &treasury);
 
     ctx.token.mint(&sender, &1000);
@@ -386,6 +384,8 @@ fn test_fee_cap() {
     let admin = Address::generate(&ctx.env);
     let treasury = Address::generate(&ctx.env);
 
+    // Initialize contract with admin (grants all roles)
+    ctx.client.initialize(&admin);
     ctx.client.initialize_fee(&admin, &1001, &treasury);
 }
 
@@ -395,6 +395,8 @@ fn test_update_fee() {
     let admin = Address::generate(&ctx.env);
     let treasury = Address::generate(&ctx.env);
 
+    // Initialize contract with admin (grants all roles)
+    ctx.client.initialize(&admin);
     ctx.client.initialize_fee(&admin, &100, &treasury);
     ctx.client.update_fee(&admin, &200);
 }
