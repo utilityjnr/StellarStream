@@ -36,30 +36,36 @@ export type StreamSumAggregateOutputType = {
 
 export type StreamMinAggregateOutputType = {
   id: string | null
+  streamId: string | null
   txHash: string | null
   sender: string | null
   receiver: string | null
   amount: string | null
+  withdrawn: string | null
   duration: number | null
   createdAt: Date | null
 }
 
 export type StreamMaxAggregateOutputType = {
   id: string | null
+  streamId: string | null
   txHash: string | null
   sender: string | null
   receiver: string | null
   amount: string | null
+  withdrawn: string | null
   duration: number | null
   createdAt: Date | null
 }
 
 export type StreamCountAggregateOutputType = {
   id: number
+  streamId: number
   txHash: number
   sender: number
   receiver: number
   amount: number
+  withdrawn: number
   duration: number
   createdAt: number
   _all: number
@@ -76,30 +82,36 @@ export type StreamSumAggregateInputType = {
 
 export type StreamMinAggregateInputType = {
   id?: true
+  streamId?: true
   txHash?: true
   sender?: true
   receiver?: true
   amount?: true
+  withdrawn?: true
   duration?: true
   createdAt?: true
 }
 
 export type StreamMaxAggregateInputType = {
   id?: true
+  streamId?: true
   txHash?: true
   sender?: true
   receiver?: true
   amount?: true
+  withdrawn?: true
   duration?: true
   createdAt?: true
 }
 
 export type StreamCountAggregateInputType = {
   id?: true
+  streamId?: true
   txHash?: true
   sender?: true
   receiver?: true
   amount?: true
+  withdrawn?: true
   duration?: true
   createdAt?: true
   _all?: true
@@ -193,10 +205,12 @@ export type StreamGroupByArgs<ExtArgs extends runtime.Types.Extensions.InternalA
 
 export type StreamGroupByOutputType = {
   id: string
+  streamId: string | null
   txHash: string
   sender: string
   receiver: string
   amount: string
+  withdrawn: string
   duration: number
   createdAt: Date
   _count: StreamCountAggregateOutputType | null
@@ -226,26 +240,31 @@ export type StreamWhereInput = {
   OR?: Prisma.StreamWhereInput[]
   NOT?: Prisma.StreamWhereInput | Prisma.StreamWhereInput[]
   id?: Prisma.StringFilter<"Stream"> | string
+  streamId?: Prisma.StringNullableFilter<"Stream"> | string | null
   txHash?: Prisma.StringFilter<"Stream"> | string
   sender?: Prisma.StringFilter<"Stream"> | string
   receiver?: Prisma.StringFilter<"Stream"> | string
   amount?: Prisma.StringFilter<"Stream"> | string
+  withdrawn?: Prisma.StringFilter<"Stream"> | string
   duration?: Prisma.IntFilter<"Stream"> | number
   createdAt?: Prisma.DateTimeFilter<"Stream"> | Date | string
 }
 
 export type StreamOrderByWithRelationInput = {
   id?: Prisma.SortOrder
+  streamId?: Prisma.SortOrderInput | Prisma.SortOrder
   txHash?: Prisma.SortOrder
   sender?: Prisma.SortOrder
   receiver?: Prisma.SortOrder
   amount?: Prisma.SortOrder
+  withdrawn?: Prisma.SortOrder
   duration?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
 }
 
 export type StreamWhereUniqueInput = Prisma.AtLeast<{
   id?: string
+  streamId?: string
   txHash?: string
   AND?: Prisma.StreamWhereInput | Prisma.StreamWhereInput[]
   OR?: Prisma.StreamWhereInput[]
@@ -253,16 +272,19 @@ export type StreamWhereUniqueInput = Prisma.AtLeast<{
   sender?: Prisma.StringFilter<"Stream"> | string
   receiver?: Prisma.StringFilter<"Stream"> | string
   amount?: Prisma.StringFilter<"Stream"> | string
+  withdrawn?: Prisma.StringFilter<"Stream"> | string
   duration?: Prisma.IntFilter<"Stream"> | number
   createdAt?: Prisma.DateTimeFilter<"Stream"> | Date | string
-}, "id" | "txHash">
+}, "id" | "streamId" | "txHash">
 
 export type StreamOrderByWithAggregationInput = {
   id?: Prisma.SortOrder
+  streamId?: Prisma.SortOrderInput | Prisma.SortOrder
   txHash?: Prisma.SortOrder
   sender?: Prisma.SortOrder
   receiver?: Prisma.SortOrder
   amount?: Prisma.SortOrder
+  withdrawn?: Prisma.SortOrder
   duration?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   _count?: Prisma.StreamCountOrderByAggregateInput
@@ -277,90 +299,108 @@ export type StreamScalarWhereWithAggregatesInput = {
   OR?: Prisma.StreamScalarWhereWithAggregatesInput[]
   NOT?: Prisma.StreamScalarWhereWithAggregatesInput | Prisma.StreamScalarWhereWithAggregatesInput[]
   id?: Prisma.StringWithAggregatesFilter<"Stream"> | string
+  streamId?: Prisma.StringNullableWithAggregatesFilter<"Stream"> | string | null
   txHash?: Prisma.StringWithAggregatesFilter<"Stream"> | string
   sender?: Prisma.StringWithAggregatesFilter<"Stream"> | string
   receiver?: Prisma.StringWithAggregatesFilter<"Stream"> | string
   amount?: Prisma.StringWithAggregatesFilter<"Stream"> | string
+  withdrawn?: Prisma.StringWithAggregatesFilter<"Stream"> | string
   duration?: Prisma.IntWithAggregatesFilter<"Stream"> | number
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"Stream"> | Date | string
 }
 
 export type StreamCreateInput = {
   id?: string
+  streamId?: string | null
   txHash: string
   sender: string
   receiver: string
   amount: string
+  withdrawn?: string
   duration: number
   createdAt?: Date | string
 }
 
 export type StreamUncheckedCreateInput = {
   id?: string
+  streamId?: string | null
   txHash: string
   sender: string
   receiver: string
   amount: string
+  withdrawn?: string
   duration: number
   createdAt?: Date | string
 }
 
 export type StreamUpdateInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
+  streamId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   txHash?: Prisma.StringFieldUpdateOperationsInput | string
   sender?: Prisma.StringFieldUpdateOperationsInput | string
   receiver?: Prisma.StringFieldUpdateOperationsInput | string
   amount?: Prisma.StringFieldUpdateOperationsInput | string
+  withdrawn?: Prisma.StringFieldUpdateOperationsInput | string
   duration?: Prisma.IntFieldUpdateOperationsInput | number
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
 export type StreamUncheckedUpdateInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
+  streamId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   txHash?: Prisma.StringFieldUpdateOperationsInput | string
   sender?: Prisma.StringFieldUpdateOperationsInput | string
   receiver?: Prisma.StringFieldUpdateOperationsInput | string
   amount?: Prisma.StringFieldUpdateOperationsInput | string
+  withdrawn?: Prisma.StringFieldUpdateOperationsInput | string
   duration?: Prisma.IntFieldUpdateOperationsInput | number
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
 export type StreamCreateManyInput = {
   id?: string
+  streamId?: string | null
   txHash: string
   sender: string
   receiver: string
   amount: string
+  withdrawn?: string
   duration: number
   createdAt?: Date | string
 }
 
 export type StreamUpdateManyMutationInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
+  streamId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   txHash?: Prisma.StringFieldUpdateOperationsInput | string
   sender?: Prisma.StringFieldUpdateOperationsInput | string
   receiver?: Prisma.StringFieldUpdateOperationsInput | string
   amount?: Prisma.StringFieldUpdateOperationsInput | string
+  withdrawn?: Prisma.StringFieldUpdateOperationsInput | string
   duration?: Prisma.IntFieldUpdateOperationsInput | number
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
 export type StreamUncheckedUpdateManyInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
+  streamId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   txHash?: Prisma.StringFieldUpdateOperationsInput | string
   sender?: Prisma.StringFieldUpdateOperationsInput | string
   receiver?: Prisma.StringFieldUpdateOperationsInput | string
   amount?: Prisma.StringFieldUpdateOperationsInput | string
+  withdrawn?: Prisma.StringFieldUpdateOperationsInput | string
   duration?: Prisma.IntFieldUpdateOperationsInput | number
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
 export type StreamCountOrderByAggregateInput = {
   id?: Prisma.SortOrder
+  streamId?: Prisma.SortOrder
   txHash?: Prisma.SortOrder
   sender?: Prisma.SortOrder
   receiver?: Prisma.SortOrder
   amount?: Prisma.SortOrder
+  withdrawn?: Prisma.SortOrder
   duration?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
 }
@@ -371,20 +411,24 @@ export type StreamAvgOrderByAggregateInput = {
 
 export type StreamMaxOrderByAggregateInput = {
   id?: Prisma.SortOrder
+  streamId?: Prisma.SortOrder
   txHash?: Prisma.SortOrder
   sender?: Prisma.SortOrder
   receiver?: Prisma.SortOrder
   amount?: Prisma.SortOrder
+  withdrawn?: Prisma.SortOrder
   duration?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
 }
 
 export type StreamMinOrderByAggregateInput = {
   id?: Prisma.SortOrder
+  streamId?: Prisma.SortOrder
   txHash?: Prisma.SortOrder
   sender?: Prisma.SortOrder
   receiver?: Prisma.SortOrder
   amount?: Prisma.SortOrder
+  withdrawn?: Prisma.SortOrder
   duration?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
 }
@@ -395,6 +439,10 @@ export type StreamSumOrderByAggregateInput = {
 
 export type StringFieldUpdateOperationsInput = {
   set?: string
+}
+
+export type NullableStringFieldUpdateOperationsInput = {
+  set?: string | null
 }
 
 export type IntFieldUpdateOperationsInput = {
@@ -413,55 +461,65 @@ export type DateTimeFieldUpdateOperationsInput = {
 
 export type StreamSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   id?: boolean
+  streamId?: boolean
   txHash?: boolean
   sender?: boolean
   receiver?: boolean
   amount?: boolean
+  withdrawn?: boolean
   duration?: boolean
   createdAt?: boolean
 }, ExtArgs["result"]["stream"]>
 
 export type StreamSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   id?: boolean
+  streamId?: boolean
   txHash?: boolean
   sender?: boolean
   receiver?: boolean
   amount?: boolean
+  withdrawn?: boolean
   duration?: boolean
   createdAt?: boolean
 }, ExtArgs["result"]["stream"]>
 
 export type StreamSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   id?: boolean
+  streamId?: boolean
   txHash?: boolean
   sender?: boolean
   receiver?: boolean
   amount?: boolean
+  withdrawn?: boolean
   duration?: boolean
   createdAt?: boolean
 }, ExtArgs["result"]["stream"]>
 
 export type StreamSelectScalar = {
   id?: boolean
+  streamId?: boolean
   txHash?: boolean
   sender?: boolean
   receiver?: boolean
   amount?: boolean
+  withdrawn?: boolean
   duration?: boolean
   createdAt?: boolean
 }
 
-export type StreamOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "txHash" | "sender" | "receiver" | "amount" | "duration" | "createdAt", ExtArgs["result"]["stream"]>
+export type StreamOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "streamId" | "txHash" | "sender" | "receiver" | "amount" | "withdrawn" | "duration" | "createdAt", ExtArgs["result"]["stream"]>
 
 export type $StreamPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "Stream"
   objects: {}
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     id: string
+    streamId: string | null
     txHash: string
     sender: string
     receiver: string
     amount: string
+    withdrawn: string
     duration: number
     createdAt: Date
   }, ExtArgs["result"]["stream"]>
@@ -888,10 +946,12 @@ export interface Prisma__StreamClient<T, Null = never, ExtArgs extends runtime.T
  */
 export interface StreamFieldRefs {
   readonly id: Prisma.FieldRef<"Stream", 'String'>
+  readonly streamId: Prisma.FieldRef<"Stream", 'String'>
   readonly txHash: Prisma.FieldRef<"Stream", 'String'>
   readonly sender: Prisma.FieldRef<"Stream", 'String'>
   readonly receiver: Prisma.FieldRef<"Stream", 'String'>
   readonly amount: Prisma.FieldRef<"Stream", 'String'>
+  readonly withdrawn: Prisma.FieldRef<"Stream", 'String'>
   readonly duration: Prisma.FieldRef<"Stream", 'Int'>
   readonly createdAt: Prisma.FieldRef<"Stream", 'DateTime'>
 }

@@ -13,12 +13,12 @@ loadEnv();
  */
 function validateEnv(): void {
   const required = ["STELLAR_RPC_URL", "CONTRACT_ID"];
-  const missing = required.filter((key) => !process.env[key]);
+  const missing = required.filter((key) => process.env[key] === undefined || process.env[key] === "");
 
   if (missing.length > 0) {
     throw new Error(
       `Missing required environment variables: ${missing.join(", ")}\n` +
-        "Please copy .env.example to .env and configure it."
+      "Please copy .env.example to .env and configure it."
     );
   }
 
@@ -27,7 +27,7 @@ function validateEnv(): void {
   if (!/^C[A-Z0-9]{55}$/.test(contractId)) {
     console.warn(
       `Warning: CONTRACT_ID format looks unusual: ${contractId}\n` +
-        "Expected format: C followed by 55 alphanumeric characters"
+      "Expected format: C followed by 55 alphanumeric characters"
     );
   }
 }
@@ -41,12 +41,12 @@ export function loadConfig(): EventWatcherConfig {
   return {
     rpcUrl: process.env.STELLAR_RPC_URL!,
     networkPassphrase:
-      process.env.STELLAR_NETWORK_PASSPHRASE ||
+      process.env.STELLAR_NETWORK_PASSPHRASE ??
       "Test SDF Network ; September 2015",
     contractId: process.env.CONTRACT_ID!,
-    pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || "5000", 10),
-    maxRetries: parseInt(process.env.MAX_RETRIES || "3", 10),
-    retryDelayMs: parseInt(process.env.RETRY_DELAY_MS || "2000", 10),
+    pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS ?? "5000", 10),
+    maxRetries: parseInt(process.env.MAX_RETRIES ?? "3", 10),
+    retryDelayMs: parseInt(process.env.RETRY_DELAY_MS ?? "2000", 10),
   };
 }
 

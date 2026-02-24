@@ -12,10 +12,12 @@ datasource db {
 
 model Stream {
   id        String   @id @default(uuid())
+  streamId  String?  @unique
   txHash    String   @unique
   sender    String
   receiver  String
   amount    String   // Using String to prevent bounds issues with BigInt
+  withdrawn String   @default("0")
   duration  Int
   createdAt DateTime @default(now())
 }

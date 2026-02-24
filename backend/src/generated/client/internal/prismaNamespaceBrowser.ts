@@ -69,10 +69,12 @@ export type TransactionIsolationLevel = (typeof TransactionIsolationLevel)[keyof
 
 export const StreamScalarFieldEnum = {
   id: 'id',
+  streamId: 'streamId',
   txHash: 'txHash',
   sender: 'sender',
   receiver: 'receiver',
   amount: 'amount',
+  withdrawn: 'withdrawn',
   duration: 'duration',
   createdAt: 'createdAt'
 } as const
@@ -86,4 +88,12 @@ export const SortOrder = {
 } as const
 
 export type SortOrder = (typeof SortOrder)[keyof typeof SortOrder]
+
+
+export const NullsOrder = {
+  first: 'first',
+  last: 'last'
+} as const
+
+export type NullsOrder = (typeof NullsOrder)[keyof typeof NullsOrder]
 
