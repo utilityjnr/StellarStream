@@ -2,7 +2,7 @@
  * Event parsing and transformation utilities
  */
 
-import { SorobanRpc, xdr } from "@stellar/stellar-sdk";
+import { SorobanRpc, xdr, scValToNative } from "@stellar/stellar-sdk";
 import { ParsedContractEvent } from "./types";
 import { logger } from "./logger";
 
@@ -98,7 +98,7 @@ function parseScVal(scVal: xdr.ScVal): unknown {
       }
 
       case "scvAddress":
-        return (scVal.address() as unknown as { toString: () => string }).toString();
+        return String(scValToNative(scVal));
 
       case "scvContractInstance":
         return "ContractInstance";
