@@ -5,6 +5,7 @@ mod errors;
 mod flash_loan;
 mod math;
 mod oracle;
+mod rbac;
 mod storage;
 mod types;
 mod vault;
