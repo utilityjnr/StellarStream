@@ -27,9 +27,10 @@ pub enum CurveType {
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Role {
-    Admin,           // Can grant/revoke roles, upgrade contract
-    Pauser,          // Can pause/unpause contract
-    TreasuryManager, // Can update fees and treasury address
+    Admin,             // Can grant/revoke roles, upgrade contract
+    Pauser,            // Can pause/unpause contract
+    TreasuryManager,   // Can update fees and treasury address
+    ComplianceOfficer, // Can execute regulatory clawbacks
 }
 
 #[contracttype]
@@ -83,6 +84,19 @@ pub struct Stream {
     pub oracle_max_staleness: u64,
     pub price_min: i128,
     pub price_max: i128,
+    /// If true, this stream is permanently locked to the original receiver.
+    /// The receiver cannot be transferred for any reason. Used for identity-based
+    /// rewards, grants, or compliance-locked distributions.
+    /// Default: false (for backward compatibility with existing streams)
+    /// Note: We use bool instead of Option<bool> to avoid storage overhead and
+    /// ensure explicit default behavior. All existing streams default to false.
+    pub is_soulbound: bool,
+    /// If true, asset has clawback enabled and can be revoked by issuer
+    pub clawback_enabled: bool,
+    /// Optional arbiter for dispute resolution
+    pub arbiter: Option<Address>,
+    /// If true, stream is frozen pending dispute resolution
+    pub is_frozen: bool,
 }
 
 // Legacy Stream struct (v1) - for migration example
@@ -137,6 +151,10 @@ pub enum DataKey {
     ContractVersion,        // Tracks current contract version
     MigrationExecuted(u32), // Tracks which migrations have been executed
     Role(Address, Role),    // RBAC: stores role assignments
+    SoulboundStreams,       // Vec<u64> of all soulbound stream IDs
+    ApprovedVaults,         // Vec<Address> of approved lending vaults
+    VaultShares(u64),       // Vault shares for stream_id
+    VotingDelegate(u64),    // Voting delegate for stream_id
 }
 
 #[contracttype]
@@ -177,6 +195,46 @@ pub struct StreamCancelledEvent {
     pub canceller: Address,
     pub to_receiver: i128,
     pub to_sender: i128,
+    pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ClawbackEvent {
+    pub stream_id: u64,
+    pub officer: Address,
+    pub amount_clawed: i128,
+    pub issuer: Address,
+    pub reason: Option<BytesN<32>>,
+    pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct StreamFrozenEvent {
+    pub stream_id: u64,
+    pub arbiter: Address,
+    pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct DisputeResolvedEvent {
+    pub stream_id: u64,
+    pub arbiter: Address,
+    pub to_sender: i128,
+    pub to_receiver: i128,
+    pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct StreamToppedUpEvent {
+    pub stream_id: u64,
+    pub sender: Address,
+    pub amount: i128,
+    pub new_total: i128,
+    pub new_end_time: u64,
     pub timestamp: u64,
 }
 

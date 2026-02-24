@@ -205,6 +205,24 @@ body {
   background: var(--stellar-secondary);
 }
 
+/* Stream list scrollbar - thinner and more subtle */
+.stream-list-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.stream-list-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.stream-list-scroll::-webkit-scrollbar-thumb {
+  background: rgba(138, 0, 255, 0.3);
+  border-radius: 3px;
+}
+
+.stream-list-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(138, 0, 255, 0.5);
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    Stellar Glass Toast Notifications
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -470,6 +488,25 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   Stellar Ledger Loader
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* 3D Transform utilities */
+.preserve-3d {
+  transform-style: preserve-3d;
+}
+
+.perspective-1000 {
+  perspective: 1000px;
+}
+
+/* Ledger loader backdrop blur */
+.ledger-loader-backdrop {
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
    Accessibility
    ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -480,5 +517,12 @@ body {
 
   .stellar-toast-progress::after {
     animation: none;
+  }
+
+  /* Disable complex animations for ledger loader */
+  [data-ledger-loader] * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

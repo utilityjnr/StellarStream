@@ -165,7 +165,11 @@
                 },
                 {
                   "u32": 0
-                }
+                },
+                {
+                  "bool": false
+                },
+                "void"
               ]
             }
           },
@@ -358,7 +362,21 @@
                           "map": [
                             {
                               "key": {
+                                "symbol": "arbiter"
+                              },
+                              "val": "void"
+                            },
+                            {
+                              "key": {
                                 "symbol": "cancelled"
+                              },
+                              "val": {
+                                "bool": false
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "clawback_enabled"
                               },
                               "val": {
                                 "bool": false
@@ -401,7 +419,23 @@
                             },
                             {
                               "key": {
+                                "symbol": "is_frozen"
+                              },
+                              "val": {
+                                "bool": false
+                              }
+                            },
+                            {
+                              "key": {
                                 "symbol": "is_paused"
+                              },
+                              "val": {
+                                "bool": false
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "is_soulbound"
                               },
                               "val": {
                                 "bool": false

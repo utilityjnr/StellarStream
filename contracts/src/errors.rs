@@ -23,4 +23,8 @@ pub enum Error {
     FlashLoanNotRepaid = 18,
     FlashLoanInProgress = 19,
     AlreadyExecuted = 20,
+    /// Stream is soulbound: receiver cannot be transferred
+    StreamIsSoulbound = 21,
+    /// Address is restricted by OFAC compliance
+    AddressRestricted = 22,
 }
