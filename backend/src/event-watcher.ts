@@ -9,7 +9,7 @@ import { parseContractEvent, extractEventType } from "./event-parser";
 import { scValToNative, xdr } from "@stellar/stellar-sdk";
 import { PrismaClient } from "./generated/client/client.js";
 
-// @ts-ignore
+// @ts-expect-error Prisma Client may not be generated yet
 const prisma = new PrismaClient();
 
 export class EventWatcher {
@@ -61,6 +61,7 @@ export class EventWatcher {
   /**
    * Stop the event watcher gracefully
    */
+  // eslint-disable-next-line @typescript-eslint/require-await
   async stop(): Promise<void> {
     if (!this.state.isRunning) {
       return;
@@ -154,7 +155,7 @@ export class EventWatcher {
       limit: 100, // Process up to 100 events per poll
     });
 
-    if (!response.events || response.events.length === 0) {
+    if (response.events === undefined || response.events.length === 0) {
       logger.debug("No new events found");
 
       // Update cursor to latest ledger even if no events
@@ -231,33 +232,38 @@ export class EventWatcher {
           let receiver = "";
           let amount = "0";
           let duration = 0;
+          let streamId = "";
 
           // Attempt to extract from Topics (using requested fromXdr and scValToNative)
-          if (event.topics && event.topics.length > 1) {
+          if (event.topics !== undefined && event.topics.length > 1) {
             const senderVal = xdr.ScVal.fromXDR(event.topics[1], "base64");
             sender = String(scValToNative(senderVal));
           }
 
           // Extract further data from the parsed value
-          const data = event.value as any;
+          const data = event.value;
           if (Array.isArray(data)) {
             // Assume [receiver, amount, duration] or similar
-            receiver = data[0] ? String(data[0]) : "";
-            amount = data[1] ? String(data[1]) : "0";
-            duration = data[2] ? Number(data[2]) : 0;
+            receiver = data[0] !== undefined ? String(data[0]) : "";
+            amount = data[1] !== undefined ? String(data[1]) : "0";
+            duration = data[2] !== undefined ? Number(data[2]) : 0;
+            // streamId might not be trivially in an array, but leave empty if not found
           } else if (typeof data === "object" && data !== null) {
+            const dataObj = data as Record<string, string | number>;
             // Assume named fields struct
-            receiver = data.receiver ? String(data.receiver) : "";
-            amount = data.amount ? String(data.amount) : "0";
-            duration = data.duration ? Number(data.duration) : 0;
-            if (!sender && data.sender) {
-              sender = String(data.sender);
+            receiver = dataObj.receiver !== undefined ? String(dataObj.receiver) : "";
+            amount = dataObj.amount !== undefined ? String(dataObj.amount) : "0";
+            duration = dataObj.duration !== undefined ? Number(dataObj.duration) : 0;
+            streamId = dataObj.stream_id !== undefined ? String(dataObj.stream_id) : "";
+            if (sender === "" && dataObj.sender !== undefined) {
+              sender = String(dataObj.sender);
             }
           }
 
           await prisma.stream.create({
             data: {
               txHash: event.txHash,
+              streamId: streamId || null,
               sender,
               receiver,
               amount,
@@ -275,6 +281,44 @@ export class EventWatcher {
           txHash: event.txHash,
           ledger: event.ledger,
         });
+
+        try {
+          const data = event.value;
+          if (data !== undefined && typeof data === "object" && data !== null) {
+            const dataObj = data as Record<string, string | number>;
+            const withdrawStreamId = dataObj.stream_id !== undefined ? String(dataObj.stream_id) : "";
+            const amountWithdrawn = dataObj.amount !== undefined ? String(dataObj.amount) : "0";
+
+            if (withdrawStreamId !== "") {
+              const stream = await prisma.stream.findUnique({
+                where: { streamId: withdrawStreamId },
+              });
+
+              if (stream) {
+                const currentWithdrawn = BigInt(stream.withdrawn || "0");
+                const newWithdrawn = BigInt(amountWithdrawn);
+                const totalWithdrawn = (currentWithdrawn + newWithdrawn).toString();
+
+                await prisma.stream.update({
+                  where: { id: stream.id },
+                  data: { withdrawn: totalWithdrawn },
+                });
+                logger.info("Stream withdrawn amount updated", {
+                  streamId: withdrawStreamId,
+                  amountWithdrawn,
+                  totalWithdrawn,
+                  txHash: event.txHash,
+                });
+              } else {
+                logger.warn("Stream not found for withdrawal", { streamId: withdrawStreamId });
+              }
+            } else {
+              logger.warn("Withdrawal event missing stream_id", { eventId: event.id });
+            }
+          }
+        } catch (error) {
+          logger.error("Failed to process stream_withdrawn event", error);
+        }
         break;
 
       case "stream_cancelled":
